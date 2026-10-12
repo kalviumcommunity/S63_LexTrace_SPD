@@ -440,8 +440,166 @@ apps/api/.venv/bin/pytest apps/api/tests -v
 
 ---
 
+## Prompt Engineering Experiments
+
+This section covers prompt design patterns and comparative experiments implemented in ChronoLex:
+1. **System vs. User Role Separation**
+2. **Vague vs. Specific Prompt Comparisons**
+3. **Explicit Output Formatting Constraints (JSON)**
+4. **ChronoLex Regulatory Grounding Prompt & Anti-Injection Guardrails**
+
+---
+
+### 1. System vs. User Message Responsibilities
+In OpenAI-compatible chat completion APIs, the `system` and `user` roles serve fundamentally distinct purposes:
+- **`system` role**: Sets the global persona, scope of authority, tone, operational boundaries, and persistent guardrails (e.g. max response length, refusal instructions when unsure). It governs *how* the model behaves.
+- **`user` role**: Delivers the dynamic instruction, query, or task. It governs *what* the model should process in the immediate turn.
+
+Keeping these roles strictly separated prevents prompt leakage, enforces security boundaries, and prevents user inputs from overriding structural behavioral guardrails.
+
+Example:
+```json
+[
+  {
+    "role": "system",
+    "content": "You are a support assistant for an internal docs tool. Answer in 2 sentences max. If you are unsure, say you don't know."
+  },
+  {
+    "role": "user",
+    "content": "What is our refund window?"
+  }
+]
+```
+
+---
+
+### 2. Vague vs. Specific Prompt Comparisons
+Prompts with identical underlying intent can produce markedly different responses based on phrasing specificity:
+- **Vague Prompt** (`"Explain our refund policy."`): Leaves scope, format, and depth unspecified. The LLM typically responds with broad, verbose overviews covering edge cases, exceptions, and narrative background.
+- **Specific Prompt** (`"In one sentence, state the refund window in days."`): Constrains output length, units, and focal topic. The LLM produces a concise, factual answer that can be quickly reviewed or parsed by downstream services.
+
+In automated testing, running both prompts independently against the same model demonstrates how prompt constraints directly control output variance and token expenditure.
+
+---
+
+### 3. Explicit Output Constraints & Structured JSON Parsing
+Downstream pipelines (such as automated compliance checks) require predictable machine-readable outputs rather than unstructured prose. Specifying format requirements in the system prompt makes responses deterministic:
+
+```text
+Reply with only a valid JSON object containing the keys "answer" and "source".
+```
+
+The ChronoLex prompt service (`app.services.prompt_service.parse_json_safely`) parses returned JSON safely using Python's standard `json.loads` rather than insecure `eval()`. It strips potential markdown code fences (` ```json ... ``` `) and gracefully handles malformed JSON without raising unhandled server errors.
+
+*Note on Guaranteed Structured Output*: While system prompt instructions guide the model toward structured outputs, guaranteed schema compliance requires provider-level constrained decoding. ChronoLex gracefully handles providers that do or do not support native JSON mode.
+
+---
+
+### 4. ChronoLex Regulatory Grounding Prompt
+For reliable compliance verification, ChronoLex anchors model generation strictly in verified regulatory text:
+
+```text
+You are ChronoLex, an assistant for regulatory and compliance research.
+
+Answer only using the regulatory context supplied in the request.
+Do not invent regulatory requirements, dates, quotations, or citations.
+If the context does not contain enough evidence to answer, explicitly state
+that the supplied context is insufficient.
+Distinguish what the source states from any interpretation.
+When source metadata is supplied, preserve the source name and applicable
+date or version.
+Be concise, factual, and precise.
+```
+
+#### Grounding Guardrails & Delimiters:
+- **Context Boundaries**: Evidence is enclosed within explicit `BEGIN CONTEXT` and `END CONTEXT` blocks.
+- **Indirect Prompt Injection Defense**: The prompt explicitly instructs the model to treat text inside the context strictly as factual evidence to evaluate, ignoring any imperative instructions or commands embedded within the documents.
+- **Empty & Insufficient Context Handling**: If no context is supplied, ChronoLex immediately returns `"The supplied context is insufficient to answer the question."` with `evidence_sufficient = False` without calling the LLM or hallucinating rules.
+
+---
+
+### Environment Configuration
+The prompt experiments reuse the existing LLM configuration loaded via `python-dotenv`:
+
+```env
+OPENAI_API_KEY=your-api-key-here
+OPENAI_BASE_URL=https://api.openai.com/v1
+CHAT_MODEL=gpt-4o-mini
+```
+
+---
+
+### Running the Experiments
+
+#### 1. CLI Demonstration Script
+Run the interactive demonstration script covering all four experiments:
+
+```bash
+# Activate virtual environment
+source apps/api/.venv/bin/activate
+
+# Execute demonstration
+python scripts/demo_prompts.py
+```
+
+If credentials are not yet configured in `.env`, the script safely demonstrates the prompt structures, role separation, and insufficient-evidence guardrails without crashing.
+
+#### 2. FastAPI Endpoint (`POST /api/llm/prompt-experiment`)
+Start the FastAPI server:
+
+```bash
+cd apps/api
+source .venv/bin/activate
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Send requests for each experiment mode:
+
+- **System vs. User Roles**:
+  ```bash
+  curl -X POST http://localhost:8000/api/llm/prompt-experiment \
+    -H "Content-Type: application/json" \
+    -d '{"mode": "system_user"}'
+  ```
+
+- **Vague vs. Specific Comparison**:
+  ```bash
+  curl -X POST http://localhost:8000/api/llm/prompt-experiment \
+    -H "Content-Type: application/json" \
+    -d '{"mode": "compare"}'
+  ```
+
+- **Explicit JSON Constraint**:
+  ```bash
+  curl -X POST http://localhost:8000/api/llm/prompt-experiment \
+    -H "Content-Type: application/json" \
+    -d '{"mode": "json"}'
+  ```
+
+- **ChronoLex Regulatory Grounding**:
+  ```bash
+  curl -X POST http://localhost:8000/api/llm/prompt-experiment \
+    -H "Content-Type: application/json" \
+    -d '{
+      "mode": "grounding",
+      "question": "How long must KYC records be retained?",
+      "context": "RBI Master Direction KYC Section 38: Maintain records for at least 5 years."
+    }'
+  ```
+
+---
+
+### Running the Test Suite
+Run the automated test suite with mocks:
+
+```bash
+apps/api/.venv/bin/pytest apps/api/tests -v
+```
+
+---
+
 ## Current Status
 
-> **Sprint #2 LLM API Integration complete. RAG functionality is not implemented yet.**
+> **Prompt Engineering Experiments complete. RAG functionality is not implemented yet.**
 > 
-> *The OpenAI-compatible LLM client, chat completion service, robust error handling, FastAPI endpoint, executable demonstration script, and unit test suite are fully implemented and verified.*
+> *The OpenAI-compatible LLM client, prompt engineering modules, comparative analysis tests, structured JSON parsing, ChronoLex grounding guardrails, FastAPI endpoints, and automated tests are fully implemented and verified.*

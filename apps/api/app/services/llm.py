@@ -144,34 +144,26 @@ class LLMService:
             return self._client
         return get_llm_client()
 
-    def send_chat_completion(
+    def send_messages(
         self,
-        user_message: str,
-        system_prompt: Optional[str] = None,
+        messages: List[Dict[str, str]],
         model: Optional[str] = None,
         client: Optional[OpenAI] = None,
     ) -> ChatResponse:
-        """Sends a chat completion request to an OpenAI-compatible API.
+        """Sends an arbitrary structured message list to an OpenAI-compatible API.
 
         Args:
-            user_message: The prompt provided by the user.
-            system_prompt: Optional system instruction. Defaults to 'You are a concise assistant.'
+            messages: List of message dictionaries with 'role' and 'content'.
             model: Optional model identifier. Defaults to configured CHAT_MODEL.
             client: Optional pre-configured OpenAI client (useful for testing or dependency injection).
 
         Returns:
             ChatResponse containing the generated answer, model name, and token usage.
         """
-        if not user_message or not user_message.strip():
-            raise ValueError("User message cannot be empty.")
+        if not messages:
+            raise ValueError("Messages list cannot be empty.")
 
         selected_model = model or self.default_model or settings.CHAT_MODEL
-        sys_instruction = system_prompt or "You are a concise assistant."
-
-        messages: List[Dict[str, str]] = [
-            {"role": "system", "content": sys_instruction},
-            {"role": "user", "content": user_message.strip()},
-        ]
 
         # Log request messages (Never log credentials or auth headers)
         logger.info("REQUEST: %s", messages)
@@ -266,6 +258,36 @@ class LLMService:
                 err_msg = f"LLM provider error: {str(e)}"
                 logger.error("LLM generic error: %s", err_msg)
                 raise LLMProviderError(err_msg) from e
+
+    def send_chat_completion(
+        self,
+        user_message: str,
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
+        client: Optional[OpenAI] = None,
+    ) -> ChatResponse:
+        """Sends a chat completion request to an OpenAI-compatible API.
+
+        Args:
+            user_message: The prompt provided by the user.
+            system_prompt: Optional system instruction. Defaults to 'You are a concise assistant.'
+            model: Optional model identifier. Defaults to configured CHAT_MODEL.
+            client: Optional pre-configured OpenAI client (useful for testing or dependency injection).
+
+        Returns:
+            ChatResponse containing the generated answer, model name, and token usage.
+        """
+        if not user_message or not user_message.strip():
+            raise ValueError("User message cannot be empty.")
+
+        sys_instruction = system_prompt or "You are a concise assistant."
+
+        messages: List[Dict[str, str]] = [
+            {"role": "system", "content": sys_instruction},
+            {"role": "user", "content": user_message.strip()},
+        ]
+
+        return self.send_messages(messages=messages, model=model, client=client)
 
 
 # Singleton service instance for application-wide use
