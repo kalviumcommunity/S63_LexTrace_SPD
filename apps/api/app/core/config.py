@@ -24,12 +24,13 @@ class Settings:
         if origin.strip()
     ]
 
-    # Planned AI / LLM Configuration (Optional at initialization)
+    # LLM API Configuration
     OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
     OPENAI_BASE_URL: str = os.getenv(
         "OPENAI_BASE_URL", "https://api.openai.com/v1"
     )
-    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    CHAT_MODEL: str = os.getenv("CHAT_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
+    OPENAI_MODEL: str = CHAT_MODEL
     EMBEDDING_MODEL: str = os.getenv(
         "EMBEDDING_MODEL", "text-embedding-3-small"
     )
@@ -39,6 +40,13 @@ class Settings:
     VECTOR_DB_COLLECTION: str = os.getenv(
         "VECTOR_DB_COLLECTION", "chronolex_regulations"
     )
+
+    def validate_llm_config(self) -> None:
+        """Validate that required LLM configuration is present."""
+        if not self.OPENAI_API_KEY or not self.OPENAI_API_KEY.strip():
+            raise ValueError(
+                "OPENAI_API_KEY is not configured. Please set OPENAI_API_KEY in your environment or .env file."
+            )
 
 
 settings = Settings()
