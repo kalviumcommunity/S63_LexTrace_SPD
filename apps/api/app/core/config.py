@@ -35,6 +35,18 @@ class Settings:
         "EMBEDDING_MODEL", "text-embedding-3-small"
     )
 
+    # Optional Model Pricing Configuration (USD per 1,000 tokens)
+    LLM_INPUT_PRICE_PER_1K: float | None = (
+        float(os.getenv("LLM_INPUT_PRICE_PER_1K"))
+        if os.getenv("LLM_INPUT_PRICE_PER_1K")
+        else None
+    )
+    LLM_OUTPUT_PRICE_PER_1K: float | None = (
+        float(os.getenv("LLM_OUTPUT_PRICE_PER_1K"))
+        if os.getenv("LLM_OUTPUT_PRICE_PER_1K")
+        else None
+    )
+
     # Planned Vector Database Configuration
     VECTOR_DB_URL: str = os.getenv("VECTOR_DB_URL", "http://localhost:8000")
     VECTOR_DB_COLLECTION: str = os.getenv(

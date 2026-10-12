@@ -149,6 +149,8 @@ class LLMService:
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
         client: Optional[OpenAI] = None,
+        input_price_per_1k: Optional[float] = None,
+        output_price_per_1k: Optional[float] = None,
     ) -> ChatResponse:
         """Sends an arbitrary structured message list to an OpenAI-compatible API.
 
@@ -156,6 +158,8 @@ class LLMService:
             messages: List of message dictionaries with 'role' and 'content'.
             model: Optional model identifier. Defaults to configured CHAT_MODEL.
             client: Optional pre-configured OpenAI client (useful for testing or dependency injection).
+            input_price_per_1k: Optional input price per 1k tokens for cost calculation.
+            output_price_per_1k: Optional output price per 1k tokens for cost calculation.
 
         Returns:
             ChatResponse containing the generated answer, model name, and token usage.
@@ -189,10 +193,38 @@ class LLMService:
                 usage_info: Optional[TokenUsage] = None
                 raw_usage = getattr(raw_response, "usage", None)
                 if raw_usage is not None:
+                    p_tokens = getattr(raw_usage, "prompt_tokens", 0) or 0
+                    c_tokens = getattr(raw_usage, "completion_tokens", 0) or 0
+                    t_tokens = getattr(raw_usage, "total_tokens", 0) or 0
+
+                    # Calculate cost only when rates are explicitly configured or provided
+                    in_rate = (
+                        input_price_per_1k
+                        if input_price_per_1k is not None
+                        else settings.LLM_INPUT_PRICE_PER_1K
+                    )
+                    out_rate = (
+                        output_price_per_1k
+                        if output_price_per_1k is not None
+                        else settings.LLM_OUTPUT_PRICE_PER_1K
+                    )
+                    est_cost: Optional[float] = None
+                    if (
+                        in_rate is not None
+                        and out_rate is not None
+                        and in_rate >= 0
+                        and out_rate >= 0
+                    ):
+                        est_cost = round(
+                            (p_tokens / 1000.0 * in_rate) + (c_tokens / 1000.0 * out_rate),
+                            8,
+                        )
+
                     usage_info = TokenUsage(
-                        prompt_tokens=getattr(raw_usage, "prompt_tokens", 0) or 0,
-                        completion_tokens=getattr(raw_usage, "completion_tokens", 0) or 0,
-                        total_tokens=getattr(raw_usage, "total_tokens", 0) or 0,
+                        prompt_tokens=p_tokens,
+                        completion_tokens=c_tokens,
+                        total_tokens=t_tokens,
+                        estimated_cost=est_cost,
                     )
 
                 response_model = getattr(raw_response, "model", None) or selected_model
@@ -265,6 +297,8 @@ class LLMService:
         system_prompt: Optional[str] = None,
         model: Optional[str] = None,
         client: Optional[OpenAI] = None,
+        input_price_per_1k: Optional[float] = None,
+        output_price_per_1k: Optional[float] = None,
     ) -> ChatResponse:
         """Sends a chat completion request to an OpenAI-compatible API.
 
@@ -273,6 +307,8 @@ class LLMService:
             system_prompt: Optional system instruction. Defaults to 'You are a concise assistant.'
             model: Optional model identifier. Defaults to configured CHAT_MODEL.
             client: Optional pre-configured OpenAI client (useful for testing or dependency injection).
+            input_price_per_1k: Optional input price per 1k tokens for cost calculation.
+            output_price_per_1k: Optional output price per 1k tokens for cost calculation.
 
         Returns:
             ChatResponse containing the generated answer, model name, and token usage.
@@ -287,7 +323,13 @@ class LLMService:
             {"role": "user", "content": user_message.strip()},
         ]
 
-        return self.send_messages(messages=messages, model=model, client=client)
+        return self.send_messages(
+            messages=messages,
+            model=model,
+            client=client,
+            input_price_per_1k=input_price_per_1k,
+            output_price_per_1k=output_price_per_1k,
+        )
 
 
 # Singleton service instance for application-wide use

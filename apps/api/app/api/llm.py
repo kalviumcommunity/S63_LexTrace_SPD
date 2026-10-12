@@ -9,6 +9,14 @@ from app.models.prompts import (
     PromptExperimentRequest,
     PromptExperimentResponse,
 )
+from app.models.tokens import (
+    ContextBudgetRequest,
+    ContextBudgetResponse,
+    CostEstimateRequest,
+    CostEstimateResponse,
+    TokenEstimateCombinedRequest,
+    TokenEstimateCombinedResponse,
+)
 from app.services.llm import (
     LLMAuthenticationError,
     LLMConfigurationError,
@@ -26,6 +34,11 @@ from app.services.prompt_service import (
     run_json_constraint_experiment,
     run_system_user_experiment,
 )
+from app.utils.tokenization import (
+    calculate_cost,
+    count_tokens,
+    estimate_context_budget,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +48,7 @@ router = APIRouter(prefix="/api/llm", tags=["LLM"])
 @router.post(
     "/chat",
     response_model=ChatResponse,
+    response_model_exclude_none=True,
     summary="Send a chat completion request",
     description="Sends a user prompt to an OpenAI-compatible LLM provider and returns the answer and token usage.",
 )
@@ -209,4 +223,67 @@ def run_prompt_experiment(request: PromptExperimentRequest) -> PromptExperimentR
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred during prompt experimentation.",
+        ) from e
+
+
+@router.post(
+    "/token-estimate",
+    response_model=TokenEstimateCombinedResponse,
+    summary="Estimate token counts, API cost, and context budget",
+    description=(
+        "Calculates token counts for text, computes estimated API pricing for input/output tokens, "
+        "and checks context window budgeting against model limits."
+    ),
+)
+def estimate_tokens_endpoint(
+    request: TokenEstimateCombinedRequest,
+) -> TokenEstimateCombinedResponse:
+    """Endpoint for token counting, cost estimation, and context budgeting."""
+    try:
+        token_count: Optional[int] = None
+        text_length_chars: Optional[int] = None
+        if request.text is not None:
+            token_count = count_tokens(request.text, encoding_name=request.encoding)
+            text_length_chars = len(request.text)
+
+        cost_est = None
+        if request.cost_params is not None:
+            cost_est = calculate_cost(
+                input_tokens=request.cost_params.input_tokens,
+                output_tokens=request.cost_params.output_tokens,
+                input_price_per_1k=request.cost_params.input_price_per_1k,
+                output_price_per_1k=request.cost_params.output_price_per_1k,
+            )
+
+        budget_est = None
+        if request.budget_params is not None:
+            budget_est = estimate_context_budget(
+                system_prompt=request.budget_params.system_prompt,
+                user_question=request.budget_params.user_question,
+                retrieved_context=request.budget_params.retrieved_context,
+                conversation_history=request.budget_params.conversation_history,
+                reserved_output_tokens=request.budget_params.reserved_output_tokens,
+                safety_margin_tokens=request.budget_params.safety_margin_tokens,
+                context_limit=request.budget_params.context_limit,
+                encoding_name=request.budget_params.encoding or request.encoding,
+            )
+
+        return TokenEstimateCombinedResponse(
+            encoding=request.encoding,
+            token_count=token_count,
+            text_length_chars=text_length_chars,
+            cost_estimate=cost_est,
+            budget_estimate=budget_est,
+        )
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        logger.exception("Unexpected error in token-estimate endpoint")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred during token estimation: {e}",
         ) from e
