@@ -177,3 +177,64 @@ Automated tests mock all provider interactions so no real API key is required an
 ```bash
 pytest -v
 ```
+
+---
+
+## Prompt Engineering Experiments
+
+This section covers prompt design patterns and comparative experiments implemented in ChronoLex:
+1. **System vs. User Role Separation**
+2. **Vague vs. Specific Prompt Comparisons**
+3. **Explicit Output Formatting Constraints (JSON)**
+4. **ChronoLex Regulatory Grounding Prompt & Anti-Injection Guardrails**
+
+### 1. System vs. User Message Responsibilities
+- **`system` role**: Establishes global persona, scope of authority, tone, and operational boundaries (e.g. max response length, refusal instructions when unsure). It governs *how* the model behaves.
+- **`user` role**: Supplies dynamic task inputs, questions, and parameters. It governs *what* the model processes in the current turn.
+
+Keeping these roles strictly separated prevents prompt leakage and maintains architectural boundaries.
+
+### 2. Vague vs. Specific Prompt Comparisons
+- **Vague Prompt** (`"Explain our refund policy."`): Produces lengthy overviews covering generic edge cases and background information.
+- **Specific Prompt** (`"In one sentence, state the refund window in days."`): Constrains output length, units, and focal topic, producing concise, factual outputs.
+
+Running both prompts independently illustrates how prompt constraints minimize output variance and token costs.
+
+### 3. Explicit Output Constraints & Structured JSON Parsing
+Downstream workflows require predictable structured outputs. Specifying format requirements in the system prompt makes responses deterministic:
+
+```text
+Reply with only a valid JSON object containing the keys "answer" and "source".
+```
+
+The prompt service safely extracts and parses JSON (`app.services.prompt_service.parse_json_safely`) without using `eval()`, stripping markdown code blocks and safely handling malformed responses.
+
+### 4. ChronoLex Regulatory Grounding Prompt
+For reliable compliance verification, ChronoLex anchors model generation strictly in verified regulatory text:
+
+```text
+You are ChronoLex, an assistant for regulatory and compliance research.
+
+Answer only using the regulatory context supplied in the request.
+Do not invent regulatory requirements, dates, quotations, or citations.
+If the context does not contain enough evidence to answer, explicitly state
+that the supplied context is insufficient.
+Distinguish what the source states from any interpretation.
+When source metadata is supplied, preserve the source name and applicable
+date or version.
+Be concise, factual, and precise.
+```
+
+- **Delimited Context**: Evidence is bounded with `BEGIN CONTEXT` / `END CONTEXT`.
+- **Anti-Injection Guardrails**: Context is strictly treated as evidence, ignoring any embedded instructions.
+- **Empty Context Refusal**: If no context is provided, ChronoLex immediately returns an insufficient-evidence response without invoking the LLM.
+
+### Running Experiments & Tests
+
+```bash
+# Run CLI demonstration script
+python ../../scripts/demo_prompts.py
+
+# Run unit tests
+pytest -v
+```

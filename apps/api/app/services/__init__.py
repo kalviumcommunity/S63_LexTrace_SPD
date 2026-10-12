@@ -1,5 +1,3 @@
-"""Business logic and external services package."""
-
 from app.services.llm import (
     LLMAuthenticationError,
     LLMConfigurationError,
@@ -10,6 +8,21 @@ from app.services.llm import (
     LLMServiceError,
     get_llm_client,
     llm_service,
+)
+from app.services.prompt_service import (
+    CHRONOLEX_GROUNDING_SYSTEM_PROMPT,
+    COMPARISON_SYSTEM_PROMPT,
+    DEFAULT_SYSTEM_ROLE_PROMPT,
+    DEFAULT_USER_ROLE_PROMPT,
+    JSON_CONSTRAINT_SYSTEM_PROMPT,
+    build_grounded_messages,
+    build_json_constraint_messages,
+    build_system_user_messages,
+    compare_vague_and_specific_prompts,
+    parse_json_safely,
+    run_grounded_query,
+    run_json_constraint_experiment,
+    run_system_user_experiment,
 )
 
 __all__ = [
@@ -22,4 +35,17 @@ __all__ = [
     "LLMServiceError",
     "get_llm_client",
     "llm_service",
+    "CHRONOLEX_GROUNDING_SYSTEM_PROMPT",
+    "COMPARISON_SYSTEM_PROMPT",
+    "DEFAULT_SYSTEM_ROLE_PROMPT",
+    "DEFAULT_USER_ROLE_PROMPT",
+    "JSON_CONSTRAINT_SYSTEM_PROMPT",
+    "build_grounded_messages",
+    "build_json_constraint_messages",
+    "build_system_user_messages",
+    "compare_vague_and_specific_prompts",
+    "parse_json_safely",
+    "run_grounded_query",
+    "run_json_constraint_experiment",
+    "run_system_user_experiment",
 ]
