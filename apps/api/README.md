@@ -232,9 +232,24 @@ Be concise, factual, and precise.
 ### Running Experiments & Tests
 
 ```bash
-# Run CLI demonstration script
+# Run CLI prompt demonstration script
 python ../../scripts/demo_prompts.py
 
-# Run unit tests
+# Run CLI token & cost estimation demonstration script
+python ../../scripts/token_cost_demo.py
+
+# Run unit and integration tests
 pytest -v
 ```
+
+---
+
+## Tokenization, Cost Estimation & Context Budgets
+
+### Overview
+The tokenization module provides offline text analysis, API cost forecasting, context-window budgeting, and corpus-scale estimation:
+- **`app.utils.tokenization.count_tokens`**: Offline token counting via `tiktoken` (default encoding: `cl100k_base`).
+- **`app.utils.tokenization.calculate_cost`**: API cost calculations with non-negative validation and separate input/output pricing.
+- **`app.utils.tokenization.estimate_context_budget`**: Request budgeting covering system prompt, user prompt, retrieved evidence, history, reserved output tokens, and safety margins.
+- **`app.utils.tokenization.estimate_corpus_scale`**: Corpus volume and hypothetical chat input costs scaled to 4,000 documents.
+- **`POST /api/llm/token-estimate`**: FastAPI endpoint returning token counts, cost evaluations, and context budget breakdown.

@@ -589,6 +589,115 @@ Send requests for each experiment mode:
 
 ---
 
+## Tokenization, Cost Estimation & Context Budgets
+
+### 1. What Tokens Are & Why They Differ From Words and Characters
+Large Language Models process text as discrete numerical sequences called **tokens**, rather than individual words or characters:
+- **Tokens $\neq$ Words $\neq$ Characters**: A word is not guaranteed to produce one token. For example:
+  - `"refund"` $\rightarrow$ **1 token** (`[32338]` in `cl100k_base`).
+  - `"What is our refund window?"` $\rightarrow$ **6 tokens** (`['What', ' is', ' our', ' refund', ' window', '?']`).
+  - Complex terminology, legal Latin, numbers, punctuation, and capitalization break into multiple sub-word tokens (e.g., `"ChronoLex"` $\rightarrow$ 3 tokens).
+- **Encoding Differences**: Token counts depend on the tokenizer encoding scheme (`cl100k_base` for GPT-4o / GPT-4 / text-embedding-3, `p50k_base` for code models, `r50k_base` / `gpt2` for earlier architectures). Token counts differ across providers and model families.
+- **Provider Overhead vs. Local Estimates**: Local tokenization calculates string tokens accurately, but live provider API requests incur additional chat formatting overhead (`<|im_start|>`, role headers, trailing turn indicators).
+
+### 2. Dependency Setup & Verification
+ChronoLex utilizes the high-performance `tiktoken` library for local token counting and offline analysis without requiring paid API keys:
+
+```bash
+cd apps/api
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 3. Running the Offline Demonstration Script
+The demonstration script (`scripts/token_cost_demo.py`) operates 100% offline without requiring an API key:
+
+```bash
+# Run full demonstration with defaults
+apps/api/.venv/bin/python scripts/token_cost_demo.py
+
+# Inspect CLI options
+apps/api/.venv/bin/python scripts/token_cost_demo.py --help
+
+# Evaluate custom token counts and pricing
+apps/api/.venv/bin/python scripts/token_cost_demo.py \
+  --input-tokens 2500 \
+  --output-tokens 600 \
+  --input-price 0.0005 \
+  --output-price 0.0015
+
+# Count tokens in a specific document or directory
+apps/api/.venv/bin/python scripts/token_cost_demo.py --file path/to/document.txt
+apps/api/.venv/bin/python scripts/token_cost_demo.py --docs-dir path/to/docs/
+```
+
+### 4. Counting Tokens in Files & `data/policy.txt`
+The utility checks for `data/policy.txt` in the repository root:
+- If `data/policy.txt` is missing, ChronoLex does **not** create fake content. It clearly logs that the file is not found and instructs the user how to supply a UTF-8 text file.
+- To analyze a policy file, create `data/policy.txt` with your compliance text or pass `--file <path>`.
+
+### 5. API Cost Estimation Formula
+Estimated API costs are calculated using prompt and completion token counts with model-specific rates per 1,000 tokens:
+
+$$\text{Total Cost} = \left(\frac{\text{Input Tokens}}{1,000} \times \text{Input Price per 1k}\right) + \left(\frac{\text{Output Tokens}}{1,000} \times \text{Output Price per 1k}\right)$$
+
+- **Illustrative Rates**: ChronoLex demonstrates with illustrative default rates ($0.0005 per 1,000 input tokens; $0.0015 per 1,000 output tokens). **These are illustrative defaults and must be replaced with verified, model-specific provider pricing.**
+- **Non-Negative Validation**: All token counts and price rates are validated to be non-negative.
+- **Zero-Usage & Edge Cases**: Correctly supports zero tokens, input-only completions, and output-only generation without precision loss.
+
+### 6. Provider-Reported Usage vs. Local Estimates
+When live LLM requests succeed:
+- ChronoLex extracts `response.usage.prompt_tokens`, `completion_tokens`, and `total_tokens` directly from the provider response.
+- If model-specific pricing (`LLM_INPUT_PRICE_PER_1K` and `LLM_OUTPUT_PRICE_PER_1K`) is configured in the environment or passed at runtime, `TokenUsage.estimated_cost` is calculated and attached.
+- If rates are not configured or the provider omits usage data, ChronoLex gracefully retains `None` without inventing numbers or failing.
+
+### 7. Context-Window Budgeting
+Before sending large regulatory prompts to the LLM, ChronoLex evaluates request fit against a configured context budget:
+- **Components Tracked**:
+  1. System prompt tokens
+  2. User question tokens
+  3. Retrieved context tokens (regulatory circular excerpts)
+  4. Conversation history tokens (prior turns)
+  5. Reserved output tokens (budgeted for LLM generation)
+  6. Safety margin buffer (for chat format overhead and tokenizer variance)
+- **Overage Reporting**: When total demanded tokens exceed the model context window limit, ChronoLex flags `fits_budget: false` and calculates the exact overage so the retrieval pipeline can adjust chunk selection rather than silently truncating text.
+
+### 8. Corpus-Scale Token and Cost Scaling (4,000 Documents)
+To plan storage, vector indexing, and runtime RAG budgets across large corpora:
+- **Corpus Statistics**: Calculates total documents, total token volume, average tokens per document, and min/max lengths.
+- **4,000 Document Projection**: For a regulatory corpus of 4,000 documents averaging ~750 tokens per snippet:
+  - Total Corpus Tokens: $\approx 3,000,000\text{ tokens}$.
+  - Hypothetical Chat Input Cost: $\approx \$1.50$ (at $\$0.0005$ per 1k input tokens).
+- **Critical Architectural Distinction**:
+  1. **Local Tokenization**: Fast, offline counting via `tiktoken`. Zero API cost.
+  2. **Embedding Ingestion**: One-time cost to transform documents into dense vector representations for ChromaDB indexing.
+  3. **Chat Generation**: Recurring per-query cost where only the top-$k$ retrieved chunks ($\sim 1,000\text{--}2,000\text{ tokens}$) are sent into the LLM context window—*never* all 4,000 documents at once.
+
+### 9. FastAPI Endpoint (`POST /api/llm/token-estimate`)
+The API exposes an endpoint for token estimation, pricing calculations, and context budgeting:
+
+```bash
+curl -X POST http://localhost:8000/api/llm/token-estimate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "What is our refund window?",
+    "encoding": "cl100k_base"
+  }'
+```
+
+Response:
+```json
+{
+  "encoding": "cl100k_base",
+  "token_count": 6,
+  "text_length_chars": 26,
+  "cost_estimate": null,
+  "budget_estimate": null
+}
+```
+
+---
+
 ### Running the Test Suite
 Run the automated test suite with mocks:
 
@@ -600,6 +709,6 @@ apps/api/.venv/bin/pytest apps/api/tests -v
 
 ## Current Status
 
-> **Prompt Engineering Experiments complete. RAG functionality is not implemented yet.**
+> **Tokenization, Token Counting, Cost Estimation, and Context Budgeting complete. Vector database and retrieval pipelines are scheduled for the next milestone.**
 > 
-> *The OpenAI-compatible LLM client, prompt engineering modules, comparative analysis tests, structured JSON parsing, ChronoLex grounding guardrails, FastAPI endpoints, and automated tests are fully implemented and verified.*
+> *The OpenAI-compatible LLM client, prompt engineering framework, tiktoken utilities, cost estimators, context window budgeters, FastAPI endpoints, offline CLI demo, and automated test suite are fully implemented and verified.*
