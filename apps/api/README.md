@@ -253,3 +253,16 @@ The tokenization module provides offline text analysis, API cost forecasting, co
 - **`app.utils.tokenization.estimate_context_budget`**: Request budgeting covering system prompt, user prompt, retrieved evidence, history, reserved output tokens, and safety margins.
 - **`app.utils.tokenization.estimate_corpus_scale`**: Corpus volume and hypothetical chat input costs scaled to 4,000 documents.
 - **`POST /api/llm/token-estimate`**: FastAPI endpoint returning token counts, cost evaluations, and context budget breakdown.
+
+---
+
+## Structured Output & JSON Validation
+
+### Overview
+The structured output module enforces deterministic JSON responses, syntax validation via `json.loads()`, schema validation with Pydantic, and bounded 1-retry error recovery:
+- **`app.utils.json_parsing.parse_response`**: Safely parses model output using `json.loads()`, enforces JSON object constraint (`isinstance(data, dict)`), verifies required keys (`("answer", "source")`), and strips markdown code fences without using `eval()`.
+- **`app.utils.json_parsing.validate_schema`**: Generic schema validator using Pydantic models.
+- **`app.models.structured.StructuredAnswer`**: Schema model with strict string types (`strict=True`), rejecting empty and whitespace-only values.
+- **`app.services.structured_service.request_structured_completion`**: Orchestrates structured requests with `temperature=0`, JSON mode (`response_format={"type": "json_object"}`), and bounded 1-attempt retry recovery with prompt reminders.
+- **`POST /api/llm/structured`**: FastAPI endpoint returning validated JSON (`{ "answer": "...", "source": "..." }`) or HTTP 422 structured error.
+

@@ -151,6 +151,8 @@ class LLMService:
         client: Optional[OpenAI] = None,
         input_price_per_1k: Optional[float] = None,
         output_price_per_1k: Optional[float] = None,
+        temperature: Optional[float] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> ChatResponse:
         """Sends an arbitrary structured message list to an OpenAI-compatible API.
 
@@ -160,6 +162,8 @@ class LLMService:
             client: Optional pre-configured OpenAI client (useful for testing or dependency injection).
             input_price_per_1k: Optional input price per 1k tokens for cost calculation.
             output_price_per_1k: Optional output price per 1k tokens for cost calculation.
+            temperature: Optional sampling temperature (e.g., 0.0 for deterministic JSON).
+            response_format: Optional response format constraint dict (e.g., {"type": "json_object"}).
 
         Returns:
             ChatResponse containing the generated answer, model name, and token usage.
@@ -175,12 +179,21 @@ class LLMService:
         active_client = client or self._client or get_llm_client()
 
         attempt = 0
+        current_response_format = response_format
+        current_temperature = temperature
+
         while True:
             try:
-                raw_response = active_client.chat.completions.create(
-                    model=selected_model,
-                    messages=messages,
-                )
+                create_params: Dict[str, Any] = {
+                    "model": selected_model,
+                    "messages": messages,
+                }
+                if current_temperature is not None:
+                    create_params["temperature"] = current_temperature
+                if current_response_format is not None:
+                    create_params["response_format"] = current_response_format
+
+                raw_response = active_client.chat.completions.create(**create_params)
 
                 # Safe content extraction
                 answer = ""
@@ -282,6 +295,20 @@ class LLMService:
                 raise LLMConnectionError(err_msg) from e
 
             except APIStatusError as e:
+                # Deliberate fallback for unsupported response_format (e.g. HTTP 400 from incompatible providers)
+                if current_response_format is not None and e.status_code == 400:
+                    err_text = (getattr(e, "message", None) or str(e)).lower()
+                    if any(
+                        keyword in err_text
+                        for keyword in ["response_format", "json_object", "unsupported parameter"]
+                    ):
+                        logger.warning(
+                            "Provider does not support response_format: %s. Falling back without response_format.",
+                            getattr(e, "message", str(e)),
+                        )
+                        current_response_format = None
+                        continue
+
                 err_msg = f"LLM provider error ({e.status_code}): {e.message}"
                 logger.error("LLM API status error: %s", err_msg)
                 raise LLMProviderError(err_msg, status_code=e.status_code if e.status_code in (400, 403, 404, 502, 503, 504) else 502) from e
@@ -327,6 +354,39 @@ class LLMService:
             messages=messages,
             model=model,
             client=client,
+            input_price_per_1k=input_price_per_1k,
+            output_price_per_1k=output_price_per_1k,
+        )
+
+    def send_structured_completion(
+        self,
+        question: str,
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
+        schema: Any = None,
+        temperature: float = 0.0,
+        use_json_mode: bool = True,
+        client: Optional[OpenAI] = None,
+        input_price_per_1k: Optional[float] = None,
+        output_price_per_1k: Optional[float] = None,
+    ):
+        """Sends a structured completion request with Pydantic validation and bounded recovery.
+
+        Delegates to request_structured_completion.
+        """
+        from app.services.structured_service import request_structured_completion
+        from app.models.structured import StructuredAnswer
+
+        target_schema = schema if schema is not None else StructuredAnswer
+        return request_structured_completion(
+            question=question,
+            system_prompt=system_prompt,
+            model=model,
+            schema=target_schema,
+            temperature=temperature,
+            use_json_mode=use_json_mode,
+            client=client,
+            service=self,
             input_price_per_1k=input_price_per_1k,
             output_price_per_1k=output_price_per_1k,
         )

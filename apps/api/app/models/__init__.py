@@ -7,6 +7,11 @@ from app.models.prompts import (
     PromptExperimentRequest,
     PromptExperimentResponse,
 )
+from app.models.structured import (
+    StructuredAnswer,
+    StructuredRequest,
+    StructuredResponse,
+)
 from app.models.tokens import (
     ContextBudgetRequest,
     ContextBudgetResponse,
@@ -40,4 +45,7 @@ __all__ = [
     "CorpusScaleEstimate",
     "TokenEstimateCombinedRequest",
     "TokenEstimateCombinedResponse",
+    "StructuredAnswer",
+    "StructuredRequest",
+    "StructuredResponse",
 ]

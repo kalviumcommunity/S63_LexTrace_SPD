@@ -71,6 +71,8 @@ Grounded Answer + Citations (Exact circular, section, paragraph, and date)
 | Feature | Status | Description |
 |---|---|---|
 | **OpenAI-Compatible LLM API Access** | 🟢 **Implemented** | Configurable client, chat completions, usage tracking, backoff & error handling. |
+| **Token Estimation & Cost Budgeting** | 🟢 **Implemented** | Tiktoken token counting, cost modeling, context window budgeting, and corpus scaling. |
+| **Structured Output & JSON Validation** | 🟢 **Implemented** | Strict schema validation, Pydantic enforcement, bounded 1-retry recovery, and POST /api/llm/structured. |
 | **Regulatory Document Ingestion** | ⏳ *Planned (Week 2)* | Automated ingestion of multi-page PDF circulars and regulatory directives. |
 | **PDF Text Extraction & Cleaning** | ⏳ *Planned (Week 2)* | Robust parsing preserving tables, section headers, and removing recurrent noise. |
 | **Intelligent Chunking** | ⏳ *Planned (Week 2)* | Clause-aware token chunking with sliding overlap to maintain regulatory context. |
@@ -698,8 +700,203 @@ Response:
 
 ---
 
-### Running the Test Suite
-Run the automated test suite with mocks:
+Response:
+```json
+{
+  "encoding": "cl100k_base",
+  "token_count": 6,
+  "text_length_chars": 26,
+  "cost_estimate": null,
+  "budget_estimate": null
+}
+```
+
+---
+
+## Structured Output & JSON Validation
+
+### 1. Why Structured Output is Critical for Compliance Applications
+In an enterprise regulatory assistant like ChronoLex, model responses cannot remain unstructured free-form prose. Downstream systems—including audit trails, workflow orchestrators, automated risk classifiers, and frontend inspectors—require strict, predictable data contracts.
+- **Fragility of Free-Form Prose**: Parsing prose with regular expressions or heuristics is brittle, sensitive to phrasing nuances, and susceptible to hallucinations or conversational filler.
+- **Type Safety & Schema Integrity**: Structured JSON output ensures responses conform to explicit field names, required types, and non-empty constraints.
+- **Deterministic Downstream Execution**: Strongly typed responses enable programmatic handling, reliable database logging, and direct binding into strongly typed client components.
+
+---
+
+### 2. How the System Prompt Enforces Fixed JSON Schemas
+ChronoLex enforces structured output at the prompt layer by employing a strict system instruction:
+
+```
+Reply with ONLY a JSON object containing the keys "answer" and "source". Do not include any additional prose.
+```
+
+- **Role Separation**: The system prompt defines the data contract and format constraints, while the user message conveys the compliance inquiry.
+- **Anti-Prose Directives**: Explicit instructions instruct the model to omit Markdown code fences, conversational greetings, and post-generation disclaimers.
+- **Deterministic Sampling**: The LLM is invoked with `temperature=0.0` when supported by the configured model to minimize token variance and ensure repeatable, structured generation.
+
+---
+
+### 3. JSON Mode: Capabilities and Critical Boundaries
+When supported by the underlying OpenAI-compatible provider, ChronoLex supplies `response_format={"type": "json_object"}`.
+
+#### Critical Distinction: Syntax Guarantee vs. Schema Validity
+> [!IMPORTANT]
+> **JSON mode guarantees valid JSON syntax, but it does NOT guarantee schema conformance or factual accuracy.**
+> - **What JSON mode does**: Constrains the token generation probability distribution so the output parses without a syntax error (`json.loads()` will not raise `JSONDecodeError`).
+> - **What JSON mode does NOT do**: It does **not** verify that required keys (`answer`, `source`) are present, that values are non-empty strings rather than numbers or lists, or that the content is factually accurate or grounded in regulatory reality.
+> - **Necessity of Application-Layer Validation**: Local parsing and Pydantic validation remain mandatory even when JSON mode is active.
+
+#### Graceful Provider Fallback
+Certain proxy providers, self-hosted endpoints, or specialized models (e.g. reasoning models) reject `response_format={"type": "json_object"}` with HTTP 400 (`unsupported parameter`).
+- ChronoLex detects unsupported `response_format` errors without crashing or entering infinite loops.
+- The service gracefully falls back to explicit prompt instructions combined with local parsing and validation.
+
+---
+
+### 4. Parsing and Validation: `json.loads()` and Pydantic
+ChronoLex implements a two-stage parsing and validation pipeline:
+
+```
+Raw Model String
+       │
+       ▼
+1. Clean & Strip Markdown Fences (```json ... ```)
+       │
+       ▼
+2. Python json.loads() ────[Syntax Error]───► Malformed Error
+       │
+       ▼
+3. Enforce Dict / JSON Object ───[List / Primitive]──► Type Error
+       │
+       ▼
+4. Check Required Keys ("answer", "source") ───[Missing Keys]──► Missing Field Error
+       │
+       ▼
+5. Pydantic Schema Validation (StructuredAnswer)
+       ├─ Strict String Types (strict=True)
+       ├─ Non-Empty & Whitespace-Only Rejection
+       └─ [Validation Failure] ───► Schema Validation Error
+       │
+       ▼
+Validated StructuredAnswer Model
+```
+
+#### The Reusable Parser (`app.utils.json_parsing.parse_response`):
+- Strips surrounding Markdown code fences if the model wraps JSON.
+- Parses with Python's native `json.loads()`.
+- Verifies that the root object is a `dict`, explicitly rejecting JSON arrays (`[...]`) and primitives (`"string"`, `42`, `true`).
+- Confirms the presence of all required fields before schema instantiation.
+- Never uses `eval()` or dangerous deserializers.
+
+#### Pydantic Model (`app.models.structured.StructuredAnswer`):
+```python
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+class StructuredAnswer(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+    answer: str = Field(min_length=1, description="The generated answer.")
+    source: str = Field(min_length=1, description="The source or evidence reference.")
+
+    @field_validator("answer", "source")
+    @classmethod
+    def validate_not_whitespace(cls, v: str) -> str:
+        if not isinstance(v, str):
+            raise ValueError("Field must be a string.")
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("Field cannot be empty or whitespace-only.")
+        return stripped
+```
+
+---
+
+### 5. Bounded Error Recovery & Single-Retry Policy
+Models occasionally produce malformed syntax, truncate JSON, or omit required keys. ChronoLex implements a resilient, bounded recovery mechanism:
+
+1. **Attempt 1**: The query is sent with strict system prompts, `temperature=0`, and JSON mode.
+2. **Local Evaluation**: The output is evaluated by `parse_response` and Pydantic validation.
+3. **Bounded Retry (At Most Once)**:
+   - If parsing or schema validation fails, ChronoLex initiates **exactly one** recovery retry (`retries = 1`).
+   - The retry conversation appends the assistant's invalid output and a targeted reminder:
+     `"Your previous response failed validation: <reason>. Please reply with ONLY a valid JSON object containing keys ['answer', 'source']."`
+4. **Permanent Failure Handling**:
+   - If the retry succeeds, the validated object is returned with `retries: 1`.
+   - If the retry fails, ChronoLex raises `StructuredOutputError` and returns HTTP 422 Unprocessable Content. Unvalidated model output is **never** returned as a successful response.
+5. **Immediate Failure on Non-Retryable Errors**: Permanent errors—such as HTTP 401 Authentication errors or missing configuration—fail immediately with 0 retries.
+
+#### Why Retrying is Limited to Exactly One Attempt
+- **Latency & Cost Bounding**: Repeated retries multiply token consumption and inflate API costs.
+- **Runaway Loop Prevention**: If a deterministic prompt (`temperature=0`) with explicit reminder fails twice, subsequent retries are statistically unlikely to succeed.
+- **Fail-Fast Integrity**: Enterprise compliance pipelines require fast, deterministic failure signals rather than prolonged hanging requests.
+
+---
+
+### 6. Regulatory Caution: Model Attribution vs. Verified Citations
+> [!CAUTION]
+> In standalone demonstration mode (without an active retrieval pipeline), the model-generated `source` field represents **model-reported attribution**, not an authoritative regulatory citation.
+> ChronoLex strictly prevents treating model-invented sources as legal evidence until verified by the layout-aware retrieval pipeline (scheduled for Milestone 4).
+
+---
+
+### 7. FastAPI Endpoint (`POST /api/llm/structured`)
+The API exposes an endpoint for requesting validated structured answers:
+
+```bash
+curl -X POST http://localhost:8000/api/llm/structured \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "What is the typical timeline for filing a Suspicious Activity Report (SAR)?"
+  }'
+```
+
+#### Successful Response (`200 OK`):
+```json
+{
+  "answer": "Suspicious Activity Reports (SARs) must generally be filed within 30 calendar days of the initial detection of facts that may constitute a basis for filing.",
+  "source": "31 CFR 1020.320 / FinCEN SAR Regulations",
+  "model": "gpt-4o-mini",
+  "usage": {
+    "prompt_tokens": 42,
+    "completion_tokens": 34,
+    "total_tokens": 76,
+    "estimated_cost": null
+  },
+  "retries": 0
+}
+```
+
+#### Validation Failure Response (`422 Unprocessable Content`):
+```json
+{
+  "detail": {
+    "error": "Structured output validation failed",
+    "message": "Model output failed structured JSON validation after 1 retry: missing fields: ['source']",
+    "validation_error": "missing fields: ['source']",
+    "retries": 1
+  }
+}
+```
+
+---
+
+### 8. Running the Demonstration and Tests
+
+#### Running the Demonstration Script
+Execute the offline demonstration script covering valid parsing, markdown stripping, schema validation, and bounded retry recovery:
+
+```bash
+apps/api/.venv/bin/python scripts/demo_structured.py
+```
+
+#### Running the Automated Test Suite
+Run the comprehensive test suite verifying parser rules, Pydantic constraints, bounded error recovery, authentication isolation, and API endpoints (100% mocked offline):
+
+```bash
+apps/api/.venv/bin/pytest apps/api/tests/test_structured.py -v
+```
+
+Run all tests across the ChronoLex backend:
 
 ```bash
 apps/api/.venv/bin/pytest apps/api/tests -v
@@ -709,6 +906,7 @@ apps/api/.venv/bin/pytest apps/api/tests -v
 
 ## Current Status
 
-> **Tokenization, Token Counting, Cost Estimation, and Context Budgeting complete. Vector database and retrieval pipelines are scheduled for the next milestone.**
+> **Structured LLM Output, JSON Response Handling, Pydantic Schema Validation, and Bounded Error Recovery complete. Regulatory Document Ingestion and PDF extraction are scheduled for the next milestone.**
 > 
-> *The OpenAI-compatible LLM client, prompt engineering framework, tiktoken utilities, cost estimators, context window budgeters, FastAPI endpoints, offline CLI demo, and automated test suite are fully implemented and verified.*
+> *The OpenAI-compatible LLM client, prompt engineering framework, token cost estimator, JSON response parser, Pydantic validation models, bounded 1-retry recovery service, FastAPI endpoints, offline CLI demo, and automated test suite are fully implemented and verified.*
+

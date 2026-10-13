@@ -9,6 +9,10 @@ from app.models.prompts import (
     PromptExperimentRequest,
     PromptExperimentResponse,
 )
+from app.models.structured import (
+    StructuredRequest,
+    StructuredResponse,
+)
 from app.models.tokens import (
     ContextBudgetRequest,
     ContextBudgetResponse,
@@ -24,6 +28,10 @@ from app.services.llm import (
     LLMProviderError,
     LLMRateLimitError,
     llm_service,
+)
+from app.services.structured_service import (
+    StructuredOutputError,
+    request_structured_completion,
 )
 from app.services.prompt_service import (
     build_grounded_messages,
@@ -286,4 +294,96 @@ def estimate_tokens_endpoint(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An unexpected error occurred during token estimation: {e}",
+        ) from e
+
+
+@router.post(
+    "/structured",
+    response_model=StructuredResponse,
+    response_model_exclude_none=True,
+    summary="Request structured JSON response",
+    description=(
+        "Requests a strictly structured JSON response containing 'answer' and 'source' keys. "
+        "Applies deterministic sampling (temperature=0), JSON mode when supported, "
+        "Pydantic schema validation, and safe bounded error recovery (at most one retry). "
+        "Note: In educational demonstration mode, the 'source' field represents model attribution, "
+        "not verified retrieval evidence."
+    ),
+)
+def structured_completion_endpoint(request: StructuredRequest) -> StructuredResponse:
+    """Endpoint for structured JSON output with validation and error recovery."""
+    try:
+        validated_obj, chat_resp, retries = request_structured_completion(
+            question=request.question,
+            system_prompt=request.system_prompt,
+            temperature=request.temperature if request.temperature is not None else 0.0,
+            use_json_mode=request.use_json_mode,
+        )
+
+        return StructuredResponse(
+            answer=validated_obj.answer,
+            source=validated_obj.source,
+            model=chat_resp.model,
+            usage=chat_resp.usage,
+            retries=retries,
+        )
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+
+    except StructuredOutputError as e:
+        logger.error("Structured output validation failure: %s", e.message)
+        raise HTTPException(
+            status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
+            detail={
+                "error": "Structured output validation failed",
+                "message": e.message,
+                "validation_error": e.validation_error,
+                "retries": e.retries,
+            },
+        ) from e
+
+    except LLMConfigurationError as e:
+        logger.error("LLM configuration error: %s", e.message)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=e.message,
+        ) from e
+
+    except LLMAuthenticationError as e:
+        logger.error("LLM authentication failure: %s", e.message)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=e.message,
+        ) from e
+
+    except LLMRateLimitError as e:
+        logger.warning("LLM rate limit reached: %s", e.message)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=e.message,
+        ) from e
+
+    except LLMConnectionError as e:
+        logger.error("LLM connection error: %s", e.message)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=e.message,
+        ) from e
+
+    except LLMProviderError as e:
+        logger.error("LLM provider error: %s", e.message)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=e.message,
+        ) from e
+
+    except Exception as e:
+        logger.exception("Unexpected error in structured completion endpoint")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected internal server error occurred while processing the structured request.",
         ) from e
