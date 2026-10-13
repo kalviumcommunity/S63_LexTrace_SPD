@@ -24,6 +24,11 @@ from app.services.prompt_service import (
     run_json_constraint_experiment,
     run_system_user_experiment,
 )
+from app.services.structured_service import (
+    DEFAULT_STRUCTURED_SYSTEM_PROMPT,
+    StructuredOutputError,
+    request_structured_completion,
+)
 
 __all__ = [
     "LLMAuthenticationError",
@@ -48,4 +53,7 @@ __all__ = [
     "run_grounded_query",
     "run_json_constraint_experiment",
     "run_system_user_experiment",
+    "DEFAULT_STRUCTURED_SYSTEM_PROMPT",
+    "StructuredOutputError",
+    "request_structured_completion",
 ]
