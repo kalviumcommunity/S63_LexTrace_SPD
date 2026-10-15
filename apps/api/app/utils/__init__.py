@@ -19,6 +19,16 @@ from app.utils.tokenization import (
     inspect_policy_file,
 )
 
+from app.utils.text_cleaning import (
+    clean_text,
+    detect_repeated_headers_footers,
+    normalize_unicode_and_newlines,
+    normalize_whitespace,
+    remove_page_numbers,
+    remove_repeated_boilerplate,
+    repair_mojibake,
+)
+
 __all__ = [
     "DEFAULT_ENCODING",
     "DEFAULT_INPUT_PRICE_PER_1K",
@@ -36,4 +46,11 @@ __all__ = [
     "validate_schema",
     "parse_and_validate",
     "strip_code_fences",
+    "clean_text",
+    "normalize_unicode_and_newlines",
+    "remove_page_numbers",
+    "remove_repeated_boilerplate",
+    "normalize_whitespace",
+    "repair_mojibake",
+    "detect_repeated_headers_footers",
 ]

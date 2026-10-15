@@ -1,0 +1,31 @@
+RBI/2024-25/108
+NOTIFICATION: MASTER DIRECTION – WIRE TRANSFER MONITORING AND CUSTOMER DUE DILIGENCE
+Effective Date: April 1, 2024
+Review Date: 2026-03-31
+
+Section 1. Legislative Authority & Scope
+In exercise of the powers conferred by Section 35A of the Banking Regulation Act, 1949, the Reserve Bank of India hereby issues these mandatory directives to all Regulated Entities (REs).
+
+The RE’s internal audit team shall review compliance with these guidelines on a quarterly basis. Every bank’s board of directors must record the compliance officer’s annual declaration.
+
+Section 2. Mandatory Thresholds for Cross-Border Transactions
+
+2.1. Customer Due Diligence (CDD) Requirements:
+ 1. All cross-border remittances exceeding $10,000 USD (or equivalent in any foreign currency) require complete originator and beneficiary verification prior to fund execution.
+ 2. Cash transactions exceeding â‚150,000 INR require verification of PAN or Form 60.
+ 3. Wire transfers initiated for “high-risk accounts” shall be subject to mandatory Enhanced Due Diligence (EDD) under Rule 14.2(c).
+
+Note: Refer to page 2 of the annexure for correspondent banking disclosures. Standalone page numbers should be removed, but inline citations such as Page 2 of Annexure A must be preserved.
+
+| Tier Level | Minimum CET1 Ratio | Capital Conservation Buffer | Countercyclical Buffer |
+| Tier 1 | 5.5% | 2.5% | 0.0% - 2.5% |
+| Tier 2 | 2.0% | N/A | N/A |
+| Total | 9.0% | 2.5% | Variable |
+
+Section 3. Record Retention and Auditability
+
+3.1. General Rule:
+All records of transactions, account-opening dossiers, and beneficial ownership declarations shall be preserved for a minimum period of ten (10) years from the transaction date.
+
+3.2. Penal Provisions:
+Failure to adhere to these directions will attract statutory penalties under Section 47A(1)(c) of the Banking Regulation Act.

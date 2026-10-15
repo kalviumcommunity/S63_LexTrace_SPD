@@ -30,6 +30,12 @@ from app.services.structured_service import (
     request_structured_completion,
 )
 
+from app.services.corpus_cleaner import (
+    clean_corpus,
+    clean_corpus_directory,
+    clean_single_document,
+)
+
 __all__ = [
     "LLMAuthenticationError",
     "LLMConfigurationError",
@@ -56,4 +62,7 @@ __all__ = [
     "DEFAULT_STRUCTURED_SYSTEM_PROMPT",
     "StructuredOutputError",
     "request_structured_completion",
+    "clean_single_document",
+    "clean_corpus",
+    "clean_corpus_directory",
 ]

@@ -62,8 +62,10 @@ Thumbs.db
 # Data files (raw and processed binary documents)
 data/raw/*
 !data/raw/.gitkeep
+!data/raw/sample_*
 data/processed/*
 !data/processed/.gitkeep
+!data/processed/sample_*
 
 # Vector DB local data
 chroma_data/
