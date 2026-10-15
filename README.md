@@ -74,7 +74,7 @@ Grounded Answer + Citations (Exact circular, section, paragraph, and date)
 | **Token Estimation & Cost Budgeting** | 🟢 **Implemented** | Tiktoken token counting, cost modeling, context window budgeting, and corpus scaling. |
 | **Structured Output & JSON Validation** | 🟢 **Implemented** | Strict schema validation, Pydantic enforcement, bounded 1-retry recovery, and POST /api/llm/structured. |
 | **Regulatory Document Ingestion** | ⏳ *Planned (Week 2)* | Automated ingestion of multi-page PDF circulars and regulatory directives. |
-| **PDF Text Extraction & Cleaning** | ⏳ *Planned (Week 2)* | Robust parsing preserving tables, section headers, and removing recurrent noise. |
+| **PDF Text Extraction & Cleaning Pipeline** | 🟢 **Implemented** | Conservative layout-aware cleaner, NFKC, page-number & header/footer removal, safe mojibake repair, and batch corpus processing. |
 | **Intelligent Chunking** | ⏳ *Planned (Week 2)* | Clause-aware token chunking with sliding overlap to maintain regulatory context. |
 | **Metadata & Provenance Tracking** | ⏳ *Planned (Week 2)* | Attribution tagging for circular number, issuing authority, and effective date ranges. |
 | **Embedding Generation** | ⏳ *Planned (Week 3)* | Batch vector generation using OpenAI-compatible embedding models. |
@@ -904,9 +904,133 @@ apps/api/.venv/bin/pytest apps/api/tests -v
 
 ---
 
+## Text Extraction & Cleaning Pipeline
+
+ChronoLex implements a modular, conservative, layout-aware text cleaning pipeline designed specifically for banking circulars, compliance directives, and statutory regulatory documents.
+
+```mermaid
+flowchart TD
+    A[Raw Extracted Document / PDF Text] --> B[Stage 1: Unicode NFKC & CRLF Normalization]
+    B --> C[Stage 2: Standalone Page-Number Stripping]
+    C --> D[Stage 3: Repeated Header & Footer Removal]
+    D --> E[Stage 4: Whitespace & Paragraph Normalization]
+    E --> F[Cleaned Document Corpus Ready for Chunking]
+```
+
+### 1. Why Raw Extracted Text Harms Retrieval Quality
+Extracted text from regulatory PDFs frequently contains recurrent noise that severely degrades downstream RAG performance:
+- **Embedding Distortion**: Repeating headers on every page (e.g., `"RESERVE BANK OF INDIA - COMPLIANCE BULLETIN"`) dominate semantic vector representations, artificially inflating cosine similarity for irrelevant chunks.
+- **Context Fragmentation**: Standalone page numbers (`"Page 4 of 20"`) and broken mid-sentence page boundaries interrupt regulatory clauses, causing embedding models to lose syntactic continuity across sentences.
+- **Token Budget Waste**: Repeated navigation banners, web URLs, and blank lines consume scarce LLM context tokens without contributing evidence.
+- **Citation Inaccuracies**: Extracted boilerplate can be mistakenly cited by the LLM as authoritative regulatory text.
+
+---
+
+### 2. Unicode NFKC Normalization & Safe Mojibake Repairs
+Text is processed through Unicode NFKC (`unicodedata.normalize("NFKC", text)`):
+- **What NFKC Does**: Normalizes compatibility characters—such as ligatures (`ﬁ` → `fi`), full-width characters (`Ａ` → `A`), and non-breaking spaces (`\u00a0` → space)—into standard canonical representations.
+- **What NFKC Cannot Fix**: NFKC **cannot repair mojibake** caused by decoding UTF-8 bytes as Windows-1252 or ISO-8859-1 (e.g., `â€™` for `’` or `â€œ` for `“`).
+- **Safe Mojibake Repair**: ChronoLex applies a targeted dictionary of high-confidence replacements for common quotation, dash, and currency misinterpretations (`KNOWN_MOJIBAKE_REPLACEMENTS`). It deliberately **avoids blind re-encoding**, preventing catastrophic data corruption on mixed-encoding or already valid documents.
+
+---
+
+### 3. Page-Number Boilerplate Removal
+ChronoLex removes standalone page numbers using strict line-oriented regex matching:
+- **Patterns Handled**: Standalone lines like `Page 3 of 12`, `Page 1`, `- Page 4 of 20 -`, `— Page 5 —`, `[Page 2]`, and `pg. 7`.
+- **Inline Citation Protection**: Matching is anchored to full lines (`re.MULTILINE`), ensuring occurrences within paragraphs (e.g., `"refer to page 3 of the annexure"` or `"Section 4: Page limits"`) are **never deleted**.
+
+---
+
+### 4. Repeated Header & Footer Detection
+ChronoLex adopts a conservative strategy to detect and remove recurrent noise across pages:
+- **Page-Boundary Detection**: Uses form-feed characters (`\x0c`) or explicit section markers emitted by layout-aware document parsers.
+- **Frequency-Based Boundary Analysis**: Inspects top and bottom candidate lines across pages. If a line recurs in the header/footer zones across $\ge 2$ pages, it is classified as recurring boilerplate and stripped.
+- **Configurable Known Boilerplate**: Allows operators to supply exact strings or regex patterns (e.g., `"CONFIDENTIAL - INTERNAL BANK USE ONLY"`, portal navigation banners).
+- **Conservative Protection**: When reliable page boundaries are unavailable, ChronoLex **does not guess** or strip lines solely based on repetition, protecting legitimate repeating regulatory provisions (e.g., recurring section headings or legal formulas).
+
+---
+
+### 5. Whitespace & Structural Normalization
+- Collapses consecutive horizontal spaces and tabs into a single ASCII space without merging words.
+- Strips trailing whitespace from each line.
+- Collapses runs of three or more newlines into standardized double-newlines (`\n\n`), strictly preserving paragraph and clause boundaries.
+- Preserves structured lists (`1.`, `2.`, `(a)`), regulatory tables (`| Tier | Ratio |`), section numbers (`Section 3.1(b)`), and calendar dates (`2024-04-01`).
+
+---
+
+### 6. Pipeline Position in Future RAG Architecture
+
+```
+Raw Documents (PDF / TXT)
+       │
+       ▼
+Text Extraction (Layout-aware extraction)
+       │
+       ▼
+Text Cleaning & Normalization (ChronoLex Pipeline)  <── [Implemented Here]
+       │
+       ▼
+Intelligent Chunking (Clause & section boundary sliding windows)
+       │
+       ▼
+Dense Embeddings (Vector representation)
+       │
+       ▼
+Vector Database (ChromaDB temporal search)
+       │
+       ▼
+Retrieved Context Injection & Grounded Generation
+```
+
+---
+
+### 7. Limitations & Edge Cases
+- **Missing Page Boundaries**: In raw single-stream text where PDF page break markers (`\x0c`) are stripped prior to ingestion, auto-detection of headers/footers falls back to explicit known boilerplate patterns to avoid stripping legitimate repeating text.
+- **Complex Multi-Column Layouts**: Layout-aware parsing is assumed at the extraction stage before feeding plain text into the cleaning pipeline.
+
+---
+
+### 8. Before/After Evidence and Sample Outputs
+
+A realistic raw sample and its cleaned counterpart are available in the repository:
+- **Raw Noisy Sample**: [`data/raw/sample_regulatory_noisy.txt`](file:///Users/prithvisingh/Documents/S63_LexTrace_SPD/data/raw/sample_regulatory_noisy.txt)
+- **Cleaned Output**: [`data/processed/sample_regulatory_cleaned.txt`](file:///Users/prithvisingh/Documents/S63_LexTrace_SPD/data/processed/sample_regulatory_cleaned.txt)
+- **Before/After Report**: [`docs/examples/cleaning_before_after.md`](file:///Users/prithvisingh/Documents/S63_LexTrace_SPD/docs/examples/cleaning_before_after.md)
+
+---
+
+### 9. Running the Demonstration and Tests
+
+#### Running the Cleaning Demonstration Script
+Clean a single file and generate a markdown before/after comparison report:
+
+```bash
+apps/api/.venv/bin/python scripts/clean_documents.py \
+  --input data/raw/sample_regulatory_noisy.txt \
+  --output-dir data/processed \
+  --evidence docs/examples/cleaning_before_after.md
+```
+
+Clean an entire directory of regulatory documents:
+
+```bash
+apps/api/.venv/bin/python scripts/clean_documents.py \
+  --input data/raw \
+  --output-dir data/processed
+```
+
+#### Running Automated Tests
+Run the comprehensive cleaning and corpus-processing test suite (100% offline, zero external LLM API dependency):
+
+```bash
+apps/api/.venv/bin/pytest apps/api/tests/test_cleaning.py -v
+```
+
+---
+
 ## Current Status
 
-> **Structured LLM Output, JSON Response Handling, Pydantic Schema Validation, and Bounded Error Recovery complete. Regulatory Document Ingestion and PDF extraction are scheduled for the next milestone.**
+> **Text Extraction & Cleaning Pipeline complete. Reusable cleaning functions, Unicode NFKC normalization, safe mojibake repair, standalone page-number removal, repeated header/footer detection, whitespace normalization, corpus batch processing, before/after evidence reports, and comprehensive unit tests are fully implemented and verified.**
 > 
-> *The OpenAI-compatible LLM client, prompt engineering framework, token cost estimator, JSON response parser, Pydantic validation models, bounded 1-retry recovery service, FastAPI endpoints, offline CLI demo, and automated test suite are fully implemented and verified.*
+> *The cleaning pipeline safely preserves all regulatory citations, section numbers, dates, monetary thresholds, and table layouts while removing recurring extraction noise. Ready for downstream intelligent chunking and embedding generation.*
 

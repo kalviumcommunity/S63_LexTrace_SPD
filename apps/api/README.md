@@ -266,3 +266,18 @@ The structured output module enforces deterministic JSON responses, syntax valid
 - **`app.services.structured_service.request_structured_completion`**: Orchestrates structured requests with `temperature=0`, JSON mode (`response_format={"type": "json_object"}`), and bounded 1-attempt retry recovery with prompt reminders.
 - **`POST /api/llm/structured`**: FastAPI endpoint returning validated JSON (`{ "answer": "...", "source": "..." }`) or HTTP 422 structured error.
 
+---
+
+## Text Extraction & Cleaning Pipeline
+
+### Overview
+The text cleaning module provides conservative, layout-aware normalization specifically tailored for banking circulars, compliance advisories, and statutory regulatory documents:
+- **`app.utils.text_cleaning.clean_text`**: Reusable 4-stage cleaning pipeline (Unicode NFKC, standalone page-number removal, repeated header/footer detection, and whitespace normalization).
+- **`app.utils.text_cleaning.normalize_unicode_and_newlines`**: NFKC canonicalization, CRLF (`\r\n`) to LF (`\n`), non-breaking spaces (`\u00a0`), and safe mojibake repair (`KNOWN_MOJIBAKE_REPLACEMENTS`).
+- **`app.utils.text_cleaning.remove_page_numbers`**: Strips standalone page-number lines (e.g., `Page 3 of 12`, `Page 1`, `- Page 4 of 20 -`) without corrupting inline regulatory citations.
+- **`app.utils.text_cleaning.remove_repeated_boilerplate`**: Frequency-based multi-page header/footer detection with fallback protecting legitimate recurring section headings when page boundaries are missing.
+- **`app.utils.text_cleaning.normalize_whitespace`**: Horizontal space and tab collapsing, line trimming, and double-newline paragraph preservation (`\n\n`).
+- **`app.models.document.Document`**: Canonical document representation preserving ID, text, and metadata provenance.
+- **`app.services.corpus_cleaner.clean_corpus`**: Batch corpus processing with document-level error isolation and character metrics.
+- **`app.services.corpus_cleaner.clean_corpus_directory`**: Safe directory-level cleaning writing outputs to a separate destination without modifying raw sources.
+
