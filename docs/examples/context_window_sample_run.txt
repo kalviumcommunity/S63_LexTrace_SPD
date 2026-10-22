@@ -1,0 +1,25 @@
+﻿Naive history grows beyond the input budget; managed requests remain bounded.
+
+Strategy: trim
+Context limit: 120; input budget: 90
+turn | naive tokens | managed tokens | removed | summarized | status
+   1 |           25 |             25 |       0 |          0 | within budget
+   2 |           60 |             60 |       0 |          0 | within budget
+   3 |           95 |             77 |       1 |          0 | within budget
+   4 |          112 |             77 |       2 |          0 | within budget
+   5 |          112 |             77 |       2 |          0 | within budget
+   6 |          112 |             77 |       2 |          0 | within budget
+   7 |          112 |             77 |       2 |          0 | within budget
+   8 |          112 |             77 |       2 |          0 | within budget
+
+Strategy: summarize
+Context limit: 120; input budget: 90
+turn | naive tokens | managed tokens | removed | summarized | status
+   1 |           25 |             25 |       0 |          0 | within budget
+   2 |           60 |             60 |       0 |          0 | within budget
+   3 |           95 |             50 |       4 |          4 | within budget
+   4 |           85 |             85 |       0 |          0 | within budget
+   5 |          120 |             50 |       5 |          5 | within budget
+   6 |           85 |             85 |       0 |          0 | within budget
+   7 |          120 |             50 |       5 |          5 | within budget
+   8 |           85 |             85 |       0 |          0 | within budget

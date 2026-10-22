@@ -85,6 +85,17 @@ preserving the system message and current question. Set
 call before sending the current request. The response returns the managed
 `conversation_history` and `context_management` metadata so a stateless client
 can send the correct history on the next turn.
+
+Run the offline demonstration from the repository root:
+
+```bash
+python scripts/context_window_demo.py
+```
+
+The sample intentionally grows a conversation beyond its naive input budget
+and prints naive versus managed token counts for both trimming and
+summarization. See the captured output in
+`docs/examples/context_window_sample_run.txt`.
 - A standalone, executable demonstration script (`scripts/demo_llm.py`).
 
 > **Note**: This sprint milestone focuses strictly on foundational LLM client integration and error resilience. Document parsing, embedding generation, vector indexing, and end-to-end RAG retrieval pipelines are scheduled for subsequent sprint milestones.
