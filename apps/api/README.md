@@ -67,6 +67,24 @@ The LLM API integration connects ChronoLex to any OpenAI-compatible large langua
 - Request/response logging and usage monitoring via Python's standard `logging` module with zero credential exposure.
 - Robust, differentiated error handling for common API failure modes (HTTP 401 Unauthorized, HTTP 429 Rate Limiting, connection timeouts, and provider errors) with bounded exponential backoff.
 - A FastAPI endpoint (`POST /api/llm/chat`) exposing the completion service with input validation and clean error status mappings.
+
+### Context Window and Conversation History
+
+`POST /api/llm/chat` accepts optional `conversation_history` messages and measures
+their content tokens before every request. The request reserves space for the
+answer and a safety margin using:
+
+- `context_limit` (default `8192`)
+- `reserved_output_tokens` (default `1000`)
+- `safety_margin_tokens` (default `200`)
+
+When the calculated input exceeds the available budget, the default
+`history_strategy: "trim"` removes the oldest non-system messages while
+preserving the system message and current question. Set
+`history_strategy: "summarize"` to summarize old turns with one bounded model
+call before sending the current request. The response returns the managed
+`conversation_history` and `context_management` metadata so a stateless client
+can send the correct history on the next turn.
 - A standalone, executable demonstration script (`scripts/demo_llm.py`).
 
 > **Note**: This sprint milestone focuses strictly on foundational LLM client integration and error resilience. Document parsing, embedding generation, vector indexing, and end-to-end RAG retrieval pipelines are scheduled for subsequent sprint milestones.
@@ -280,4 +298,3 @@ The text cleaning module provides conservative, layout-aware normalization speci
 - **`app.models.document.Document`**: Canonical document representation preserving ID, text, and metadata provenance.
 - **`app.services.corpus_cleaner.clean_corpus`**: Batch corpus processing with document-level error isolation and character metrics.
 - **`app.services.corpus_cleaner.clean_corpus_directory`**: Safe directory-level cleaning writing outputs to a separate destination without modifying raw sources.
-

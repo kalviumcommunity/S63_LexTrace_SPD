@@ -66,6 +66,12 @@ def chat_completion(request: ChatRequest) -> ChatResponse:
         response = llm_service.send_chat_completion(
             user_message=request.message,
             system_prompt=request.system_prompt,
+            conversation_history=request.conversation_history,
+            retrieved_context=request.retrieved_context,
+            context_limit=request.context_limit,
+            reserved_output_tokens=request.reserved_output_tokens,
+            safety_margin_tokens=request.safety_margin_tokens,
+            history_strategy=request.history_strategy,
         )
         return response
 

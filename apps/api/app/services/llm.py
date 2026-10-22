@@ -20,6 +20,7 @@ from openai import (
 
 from app.core.config import settings
 from app.models.llm import ChatResponse, TokenUsage
+from app.services.context_window import manage_history
 
 logger = logging.getLogger(__name__)
 
@@ -326,6 +327,12 @@ class LLMService:
         client: Optional[OpenAI] = None,
         input_price_per_1k: Optional[float] = None,
         output_price_per_1k: Optional[float] = None,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        retrieved_context: Optional[str] = None,
+        context_limit: int = 8192,
+        reserved_output_tokens: int = 1000,
+        safety_margin_tokens: int = 200,
+        history_strategy: str = "trim",
     ) -> ChatResponse:
         """Sends a chat completion request to an OpenAI-compatible API.
 
@@ -344,18 +351,70 @@ class LLMService:
             raise ValueError("User message cannot be empty.")
 
         sys_instruction = system_prompt or "You are a concise assistant."
+        messages: List[Dict[str, str]] = list(conversation_history or [])
+        if not messages or messages[0].get("role") != "system":
+            messages.insert(0, {"role": "system", "content": sys_instruction})
+        if retrieved_context and retrieved_context.strip():
+            user_content = (
+                f"{user_message.strip()}\n\n"
+                f"Retrieved context:\n{retrieved_context.strip()}"
+            )
+        else:
+            user_content = user_message.strip()
+        messages.append({"role": "user", "content": user_content})
 
-        messages: List[Dict[str, str]] = [
-            {"role": "system", "content": sys_instruction},
-            {"role": "user", "content": user_message.strip()},
-        ]
+        summary_service = None
+        if history_strategy == "summarize":
+            def summary_service(old_messages: List[Dict[str, str]]) -> str:
+                summary_response = self.send_messages(
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "Summarize the conversation faithfully and concisely. Return only the summary.",
+                        },
+                        {
+                            "role": "user",
+                            "content": "\n".join(
+                                f"{message['role']}: {message['content']}"
+                                for message in old_messages
+                            ),
+                        },
+                    ],
+                    model=model,
+                    client=client,
+                    temperature=0.0,
+                )
+                return summary_response.answer
 
-        return self.send_messages(
-            messages=messages,
+        managed = manage_history(
+            messages,
+            context_limit=context_limit,
+            reserved_output_tokens=reserved_output_tokens,
+            safety_margin_tokens=safety_margin_tokens,
+            strategy=history_strategy,
+            summarizer=summary_service,
+        )
+
+        response = self.send_messages(
+            messages=managed.messages,
             model=model,
             client=client,
             input_price_per_1k=input_price_per_1k,
             output_price_per_1k=output_price_per_1k,
+        )
+        managed_history = managed.messages + [{"role": "assistant", "content": response.answer}]
+        return response.model_copy(
+            update={
+                "conversation_history": managed_history,
+                "context_management": {
+                    "input_tokens": managed.input_tokens,
+                    "budget": managed.budget,
+                    "fits_budget": managed.fits_budget,
+                    "removed_messages": managed.removed_messages,
+                    "summarized_messages": managed.summarized_messages,
+                    "strategy": history_strategy,
+                },
+            }
         )
 
     def send_structured_completion(
