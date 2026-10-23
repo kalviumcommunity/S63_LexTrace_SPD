@@ -13,6 +13,10 @@ from app.models.structured import (
     StructuredRequest,
     StructuredResponse,
 )
+from app.models.document import (
+    ChunkRequest,
+    ChunkResponse,
+)
 from app.models.tokens import (
     ContextBudgetRequest,
     ContextBudgetResponse,
@@ -42,6 +46,7 @@ from app.services.prompt_service import (
     run_json_constraint_experiment,
     run_system_user_experiment,
 )
+from app.utils.chunking import token_chunks_detailed
 from app.utils.tokenization import (
     calculate_cost,
     count_tokens,
@@ -294,6 +299,54 @@ def estimate_tokens_endpoint(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An unexpected error occurred during token estimation: {e}",
+        ) from e
+
+
+@router.post(
+    "/chunk",
+    response_model=ChunkResponse,
+    response_model_exclude_none=True,
+    summary="Token-aware document chunking",
+    description="Splits input text into token-bounded chunks with controlled token overlap.",
+)
+def chunk_text_endpoint(request: ChunkRequest) -> ChunkResponse:
+    """Chunks text into token-bounded slices with controlled overlap."""
+    text_to_process = request.text
+    if request.clean_first and text_to_process.strip():
+        from app.utils.text_cleaning import clean_text
+
+        text_to_process = clean_text(text_to_process)
+
+    try:
+        detailed = token_chunks_detailed(
+            text=text_to_process,
+            size=request.chunk_size,
+            overlap=request.chunk_overlap,
+            encoding=request.encoding_name,
+        )
+        total_chunks = len(detailed)
+        total_tokens = sum(c["token_count"] for c in detailed)
+        chunks = [c["text"] for c in detailed]
+
+        return ChunkResponse(
+            total_chunks=total_chunks,
+            total_tokens=total_tokens,
+            chunk_size=request.chunk_size,
+            chunk_overlap=request.chunk_overlap,
+            encoding_name=request.encoding_name,
+            chunks=chunks,
+            chunk_details=detailed,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        logger.exception("Unexpected error in chunk endpoint")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred during chunking: {e}",
         ) from e
 
 

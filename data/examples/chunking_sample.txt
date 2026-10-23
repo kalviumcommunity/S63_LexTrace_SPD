@@ -1,0 +1,40 @@
+RBI/2024-25/108
+NOTIFICATION: MASTER DIRECTION – WIRE TRANSFER MONITORING AND CUSTOMER DUE DILIGENCE
+Effective Date: April 1, 2024
+Review Date: 2026-03-31
+Issuing Authority: Reserve Bank of India, Department of Banking Regulation
+
+Section 1. Legislative Authority & Scope
+In exercise of the powers conferred by Section 35A of the Banking Regulation Act, 1949, the Reserve Bank of India hereby issues these mandatory directives to all Regulated Entities (REs), including commercial banks, cooperative societies, payment aggregators, and authorized non-banking institutions operating payment corridors.
+
+The RE's audit team shall review compliance with these guidelines on a quarterly basis. Every bank's board of directors must record the compliance officer's annual declaration of conformance and verify that automated transaction screening algorithms are audited by a CERT-In empanelled auditor.
+
+Section 2. Mandatory Thresholds for Cross-Border Transactions
+
+2.1. Customer Due Diligence (CDD) Requirements:
+1. All cross-border wire transfers exceeding $10,000 USD (or foreign currency equivalent) require complete originator and beneficiary verification prior to fund execution.
+2. Cash transactions exceeding 50,000 INR require verification of Permanent Account Number (PAN) or Form 60 declaration.
+3. Wire transfers initiated for high-risk accounts shall be subject to mandatory Enhanced Due Diligence (EDD) under Rule 14.2(c).
+4. Intermediary institutions involved in multi-hop correspondent payment routing must retain all technical wire messaging headers (SWIFT MT103 / ISO 20022 message structures) intact throughout transmission.
+
+Section 3. Sanctions Screening and Safe-Harbor Clearance Protocols
+
+3.1. General Prohibition and Safe-Harbor Exemption:
+Regulated entities maintaining correspondent banking corridors are strictly prohibited from executing wire transfers linked to designated jurisdictions, UNLESS the transferring institution obtains a verified statutory clearance certificate issued by the Financial Intelligence Unit (FIU-IND) within twenty-four hours of transaction initiation.
+
+Section 4. Capital Adequacy and Risk-Weighted Reserve Requirements
+
+Regulated entities maintaining cross-border remittance facilities must preserve supplementary tier-1 liquid buffers against settlement latency and currency variance.
+
+| Capital Tier | Minimum CET1 Ratio | Capital Conservation Buffer | Countercyclical Buffer |
+| Tier 1 Primary | 5.5% | 2.5% | 0.0% - 2.5% |
+| Tier 2 Subordinated | 2.0% | N/A | N/A |
+| Total Regulatory Capital | 9.0% | 2.5% | Dynamic Countercyclical |
+
+Section 5. Record Retention, Reporting Protocols, and Penal Sanctions
+
+5.1. General Rule:
+All records of transactions, account-opening dossiers, identity credentials, and beneficial ownership declarations shall be preserved for a minimum period of ten (10) years from the transaction date in tamper-evident electronic archives.
+
+5.2. Statutory Penalties:
+Failure to adhere to these directions will attract statutory penalties under Section 47A(1)(c) of the Banking Regulation Act, 1949, including pecuniary fines up to 10,000,000 INR and potential suspension of authorized dealer category banking licenses.
