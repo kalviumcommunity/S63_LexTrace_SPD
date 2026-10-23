@@ -88,3 +88,95 @@ class CorpusCleaningSummary(BaseModel):
     total_char_reduction: int = Field(default=0, ge=0)
     overall_reduction_percentage: float = Field(default=0.0)
     document_results: List[DocumentCleaningResult] = Field(default_factory=list)
+
+
+class ChunkConfig(BaseModel):
+    """Configuration for token-aware document chunking."""
+
+    chunk_size: int = Field(
+        default=400,
+        gt=0,
+        description="Maximum number of tokens per chunk.",
+    )
+    chunk_overlap: int = Field(
+        default=60,
+        ge=0,
+        description="Number of boundary tokens repeated across adjacent chunks.",
+    )
+    encoding_name: str = Field(
+        default="cl100k_base",
+        description="Tokenizer encoding name (e.g. cl100k_base).",
+    )
+
+
+class DocumentChunk(Document):
+    """A token-sized chunk of a parent document with preserved metadata and provenance.
+
+    Inherits from Document so it adheres to the core document schema with id, text, and metadata.
+    """
+
+    document_id: str = Field(
+        ...,
+        description="ID of the source document from which this chunk was derived.",
+    )
+    chunk_index: int = Field(
+        ...,
+        ge=0,
+        description="0-based sequence index of the chunk within the source document.",
+    )
+    total_chunks: int = Field(
+        default=1,
+        ge=1,
+        description="Total number of chunks produced from the source document.",
+    )
+    token_count: int = Field(
+        default=0,
+        ge=0,
+        description="Actual token count of this chunk.",
+    )
+    start_token_idx: int = Field(
+        default=0,
+        ge=0,
+        description="Start offset of the chunk in the document's token sequence.",
+    )
+    end_token_idx: int = Field(
+        default=0,
+        ge=0,
+        description="End offset of the chunk in the document's token sequence.",
+    )
+
+
+class CorpusChunkingSummary(BaseModel):
+    """Corpus-level statistics and reporting for batch chunking operations."""
+
+    total_documents: int = Field(default=0, ge=0)
+    total_chunks: int = Field(default=0, ge=0)
+    total_tokens: int = Field(default=0, ge=0)
+    avg_tokens_per_chunk: float = Field(default=0.0)
+    chunk_size: int = Field(default=400, gt=0)
+    chunk_overlap: int = Field(default=60, ge=0)
+    encoding_name: str = Field(default="cl100k_base")
+    chunks: List[DocumentChunk] = Field(default_factory=list)
+
+
+class ChunkRequest(BaseModel):
+    """API request model for token-aware chunking."""
+
+    text: str = Field(..., description="Text content to split into chunks.")
+    chunk_size: int = Field(default=400, gt=0, description="Max tokens per chunk.")
+    chunk_overlap: int = Field(default=60, ge=0, description="Token overlap between adjacent chunks.")
+    encoding_name: str = Field(default="cl100k_base", description="Tokenizer encoding name.")
+    clean_first: bool = Field(default=False, description="Whether to apply conservative text cleaning first.")
+
+
+class ChunkResponse(BaseModel):
+    """API response model for token-aware chunking."""
+
+    total_chunks: int = Field(default=0, ge=0)
+    total_tokens: int = Field(default=0, ge=0)
+    chunk_size: int = Field(default=400)
+    chunk_overlap: int = Field(default=60)
+    encoding_name: str = Field(default="cl100k_base")
+    chunks: List[str] = Field(default_factory=list)
+    chunk_details: List[Dict[str, Any]] = Field(default_factory=list)
+

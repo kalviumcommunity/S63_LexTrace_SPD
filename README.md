@@ -75,8 +75,8 @@ Grounded Answer + Citations (Exact circular, section, paragraph, and date)
 | **Structured Output & JSON Validation** | 🟢 **Implemented** | Strict schema validation, Pydantic enforcement, bounded 1-retry recovery, and POST /api/llm/structured. |
 | **Regulatory Document Ingestion** | ⏳ *Planned (Week 2)* | Automated ingestion of multi-page PDF circulars and regulatory directives. |
 | **PDF Text Extraction & Cleaning Pipeline** | 🟢 **Implemented** | Conservative layout-aware cleaner, NFKC, page-number & header/footer removal, safe mojibake repair, and batch corpus processing. |
-| **Intelligent Chunking** | ⏳ *Planned (Week 2)* | Clause-aware token chunking with sliding overlap to maintain regulatory context. |
-| **Metadata & Provenance Tracking** | ⏳ *Planned (Week 2)* | Attribution tagging for circular number, issuing authority, and effective date ranges. |
+| **Token-Aware Chunking & Overlap** | 🟢 **Implemented** | Exact BPE token-slicing (tiktoken), controlled sliding overlap (400/60), boundary-context preservation, and DocumentChunk schema. |
+| **Metadata & Provenance Tracking** | 🟢 **Implemented** | Attribution tagging for source document ID, chunk index, total chunks, token offsets, and circular metadata. |
 | **Embedding Generation** | ⏳ *Planned (Week 3)* | Batch vector generation using OpenAI-compatible embedding models. |
 | **Semantic & Top-K Retrieval** | ⏳ *Planned (Week 3)* | Cosine distance similarity search across indexed regulatory chunk vectors. |
 | **Time-Aware / Metadata Filtering** | ⏳ *Planned (Week 3)* | Hard date-boundary queries (`transaction_date BETWEEN effective_from AND effective_to`). |
@@ -1028,9 +1028,119 @@ apps/api/.venv/bin/pytest apps/api/tests/test_cleaning.py -v
 
 ---
 
+## Token-Aware Chunking & Overlap
+
+### 1. Why Character-Based Chunking is Insufficient for Regulatory Compliance
+Naive chunking approaches split text using character counts (e.g. every 1,500 characters) or arbitrary newline splits. In regulatory and legal RAG applications, character-based chunking introduces critical defects:
+- **Tokenizer Asymmetry:** LLMs and dense embedding models operate on subword tokens (Byte-Pair Encoding), not Unicode characters. Character length varies wildly based on vocabulary, table layout, punctuation, and Unicode numerals. A 1,000-character chunk may consume 220 tokens in plain text, but over 550 tokens in tabular regulatory schedules or citation-heavy clauses, making context window budgeting unpredictable.
+- **Mid-Token and Mid-Word Corruption:** Fixed-character slicing can sever multi-byte UTF-8 sequences, statutory acronyms (e.g., `FIU-IND`, `CERT-In`, `SWIFT MT103`), monetary figures (`50,000 INR`), or subsection references (`Section 47A(1)(c)`).
+- **Subword Boundary Blindness:** Token-aware chunking measures exact capacity in the embedding model's native representation, guaranteeing that every chunk strictly satisfies downstream vectorizer input constraints.
+
+### 2. How the Tokenizer Determines Chunk Boundaries
+ChronoLex utilizes OpenAI's standard `cl100k_base` Byte-Pair Encoding (BPE) tokenizer via `tiktoken`.
+1. The text is first encoded into a sequence of integer token IDs: $T = [t_0, t_1, \dots, t_{M-1}]$.
+2. Slicing windows are calculated directly across the token sequence:
+   $$\text{Chunk } i = [t_{\text{start}_i} : t_{\text{end}_i}], \quad \text{where } \text{end}_i = \min(\text{start}_i + \text{size}, M)$$
+3. The slice is decoded back into standard UTF-8 text using `enc.decode(tokens, errors="replace")`.
+4. **Important Limitation:** Token boundaries are determined by statistical byte-pair merges and do not inherently coincide with natural linguistic boundaries (sentences or clauses). Token-based slicing alone does not guarantee grammatically complete sentences. Controlled overlap is deployed specifically to mitigate this limitation.
+
+### 3. How Controlled Overlap Works
+To prevent split-sentence context loss across adjacent chunks, ChronoLex advances the next chunk window by a step smaller than the chunk size:
+$$\text{Step} = \text{size} - \text{overlap}$$
+$$\text{start}_{i+1} = \text{start}_i + \text{Step}$$
+
+This guarantees that:
+- Adjacent chunks repeat exactly the final $N$ tokens of the preceding chunk ($N = \text{overlap}$).
+- Forward progress is guaranteed because $\text{size} > \text{overlap} \ge 0 \implies \text{Step} \ge 1$.
+- Input validation strictly rejects non-positive sizes ($\text{size} \le 0$), negative overlaps ($\text{overlap} < 0$), and excessive overlaps ($\text{overlap} \ge \text{size}$).
+
+### 4. Justification of Initial Settings (400 Tokens / 60 Tokens Overlap)
+ChronoLex configures initial defaults of **400 tokens per chunk** with **60 tokens of overlap (15%)**:
+
+- **Why 400 Tokens?**
+  - **Regulatory Domain Granularity:** Banking directives, circulars, and statutory rules are predominantly organized into numbered sub-clauses spanning 150–350 tokens. A 400-token limit keeps individual chunks focused on a single operative rule while providing enough headroom for definitions, monetary conditions, and penalty clauses.
+  - **Retrieval Precision vs. Context Trade-Off:** Larger chunks (800–1,500 tokens) dilute semantic similarity by grouping multiple unrelated provisions into one embedding vector. Smaller chunks (100–200 tokens) frequently sever operative exceptions and definitions from the rules they qualify. 400 tokens strikes an effective balance.
+- **Why 60 Tokens Overlap (15%)?**
+  - 60 tokens corresponds to approximately 40–50 English words—the length of a substantial regulatory sentence, qualification clause, or cross-reference.
+  - At 15% overlap, the token duplication penalty remains manageable (under 10–15% for multi-chunk documents) while ensuring that sentences beginning near a chunk boundary are repeated in full in the adjoining chunk.
+
+### 5. Context Budgeting & Retrieval Interaction
+Chunk size directly impacts the context budget formula during prompt synthesis:
+$$\text{Demanded Context} = \text{System Prompt} + \text{User Question} + \text{Chat History} + (k \times \text{Chunk Size}) + \text{Reserved Output}$$
+
+For a standard compliance query retrieving top-$k = 4$ chunks:
+- At 400 tokens per chunk: $4 \times 400 = 1,600$ tokens of retrieved evidence.
+- This fits comfortably within standard context windows (8K, 16K, or 128K) while leaving generous room for multi-turn conversational history and structured JSON output generation.
+- **Model Tokenizer Note:** ChronoLex defaults to `cl100k_base` (matching OpenAI models like `gpt-4o-mini` and `text-embedding-3-small`). Token budgets must be re-calibrated if alternate provider models (e.g. Anthropic Claude, Google Gemini, or Meta Llama) are selected.
+
+### 6. Overlap Cost & Computational Trade-Offs
+Overlapping chunk boundaries increases token duplication, resulting in specific system trade-offs:
+- **Embedding Ingestion Cost:** Duplicated tokens must be passed to the embedding API, scaling vectorization API costs proportionally.
+- **Vector Index Storage:** The aggregate stored character and vector volume increases in the vector store.
+- **Prompt Deduplication Requirement:** RAG generation pipelines must deduplicate adjacent overlapping chunks retrieved in top-$k$ search to avoid injecting repeated text into the prompt.
+
+### 7. Empirical Results: Configuration A vs. Configuration B
+
+Evaluated against the committed benchmark sample ([`data/examples/chunking_sample.txt`](file:///Users/prithvisingh/Documents/S63_LexTrace_SPD/data/examples/chunking_sample.txt)):
+
+| Metric | Configuration A (Zero Overlap: 400/0) | Configuration B (Controlled Overlap: 400/60) | Delta / Overlap Cost |
+|---|---|---|---|
+| **Original Text Tokens** | 689 tokens | 689 tokens | Baseline |
+| **Total Chunks** | 2 chunks | 2 chunks | 0 |
+| **Tokens per Chunk** | [400, 289] | [400, 349] | — |
+| **Total Tokens Across Chunks** | 689 tokens | 749 tokens | **+60 tokens** |
+| **Duplication Percentage** | **0.00%** | **8.71%** | +8.71% |
+
+#### Verifiable Boundary-Preservation Demonstration
+Near the 400-token boundary in [`data/examples/chunking_sample.txt`](file:///Users/prithvisingh/Documents/S63_LexTrace_SPD/data/examples/chunking_sample.txt), Section 3.1 states:
+> *"Regulated entities maintaining correspondent banking corridors are strictly prohibited from executing wire transfers linked to designated jurisdictions, UNLESS the transferring institution obtains a verified statutory clearance certificate issued by the Financial Intelligence Unit (FIU-IND) within twenty-four hours of transaction initiation."*
+
+- **In Configuration A (Zero Overlap):**
+  - Chunk 1 ends at: `...strictly prohibited from executing wire transfers linked to designated jurisdictions, UNLESS the transferring institution`
+  - Chunk 2 starts with: `obtains a verified statutory clearance certificate issued by the Financial Intelligence Unit (FIU-IND)...`
+  - **Context Loss:** Chunk 1 leaves an open, unfulfilled condition. Chunk 2 contains a clearance requirement with zero antecedent context about wire transfers or designated jurisdictions.
+- **In Configuration B (60-Token Overlap):**
+  - Chunk 2 repeats the boundary context, containing Section 3.1 heading, the general prohibition, the `UNLESS` trigger, and the complete 24-hour FIU-IND statutory safe-harbor rule.
+
+### 8. Running the Demonstration and Tests
+
+#### Run the Demonstration Script
+Execute the benchmark demonstration and generate the reproducible Markdown report:
+
+```bash
+apps/api/.venv/bin/python scripts/chunk_documents.py
+```
+
+Options:
+```bash
+apps/api/.venv/bin/python scripts/chunk_documents.py \
+  --input data/examples/chunking_sample.txt \
+  --size 400 \
+  --overlap 60 \
+  --encoding cl100k_base \
+  --output docs/examples/token_chunking_results.md
+```
+
+#### Run the Automated Tests
+Run the comprehensive test suite (17 tests covering input validation, token limits, exact slice equality, zero overlap, determinism, DocumentChunk schema, sample boundary preservation, and REST API endpoints):
+
+```bash
+apps/api/.venv/bin/python -m pytest apps/api/tests/test_chunking.py -v
+```
+
+### 9. Sample Input & Evidence Locations
+- **Input Regulatory Sample:** [`data/examples/chunking_sample.txt`](file:///Users/prithvisingh/Documents/S63_LexTrace_SPD/data/examples/chunking_sample.txt)
+- **Detailed Evaluation Report:** [`docs/examples/token_chunking_results.md`](file:///Users/prithvisingh/Documents/S63_LexTrace_SPD/docs/examples/token_chunking_results.md)
+- **Reusable Chunking Module:** [`apps/api/app/utils/chunking.py`](file:///Users/prithvisingh/Documents/S63_LexTrace_SPD/apps/api/app/utils/chunking.py)
+
+### 10. Status of Settings: Initial Heuristics
+> **Important Implementation Notice:** The default parameters (400 tokens / 60 tokens overlap) represent **empirically informed initial heuristics**, not mathematically proven optimal values. ChronoLex does not yet maintain a ground-truth regulatory QA retrieval evaluation dataset. Before deploying to production, these settings must be evaluated against retrieval metrics (e.g. Hit@k, Mean Reciprocal Rank) on actual regulatory circulars and query distributions.
+
+---
+
 ## Current Status
 
-> **Text Extraction & Cleaning Pipeline complete. Reusable cleaning functions, Unicode NFKC normalization, safe mojibake repair, standalone page-number removal, repeated header/footer detection, whitespace normalization, corpus batch processing, before/after evidence reports, and comprehensive unit tests are fully implemented and verified.**
+> **Token-Aware Chunking with Controlled Overlap complete. Reusable tiktoken chunking algorithm, DocumentChunk provenance metadata schemas, batch corpus processing, 400/60 comparative benchmark demonstration, empirical boundary-preservation analysis, REST API endpoint, and comprehensive 17-case automated test suite are fully implemented and verified.**
 > 
-> *The cleaning pipeline safely preserves all regulatory citations, section numbers, dates, monetary thresholds, and table layouts while removing recurring extraction noise. Ready for downstream intelligent chunking and embedding generation.*
+> *The chunking pipeline accurately preserves regulatory context across boundaries while maintaining predictable token budgets and transparent duplication cost accounting. Ready for downstream dense embedding generation and vector database indexing.*
 

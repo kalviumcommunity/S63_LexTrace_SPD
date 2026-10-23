@@ -301,3 +301,18 @@ def count_tokens_in_directory(
             except Exception as e:
                 logger.warning("Could not read file %s: %s", file_path, e)
     return results
+
+
+def token_chunks(
+    text: Optional[str],
+    size: int = 400,
+    overlap: int = 60,
+    encoding: str = DEFAULT_ENCODING,
+) -> List[str]:
+    """Splits text into token-sized chunks with controlled token overlap.
+
+    Re-exports app.utils.chunking.token_chunks for convenient direct access.
+    """
+    from app.utils.chunking import token_chunks as _token_chunks
+
+    return _token_chunks(text=text, size=size, overlap=overlap, encoding=encoding)

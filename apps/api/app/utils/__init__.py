@@ -28,6 +28,13 @@ from app.utils.text_cleaning import (
     remove_repeated_boilerplate,
     repair_mojibake,
 )
+from app.utils.chunking import (
+    chunk_corpus,
+    chunk_document,
+    chunk_file,
+    token_chunks,
+    token_chunks_detailed,
+)
 
 __all__ = [
     "DEFAULT_ENCODING",
@@ -53,4 +60,9 @@ __all__ = [
     "normalize_whitespace",
     "repair_mojibake",
     "detect_repeated_headers_footers",
+    "token_chunks",
+    "token_chunks_detailed",
+    "chunk_document",
+    "chunk_corpus",
+    "chunk_file",
 ]
